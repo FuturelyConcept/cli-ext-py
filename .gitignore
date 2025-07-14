@@ -1,0 +1,39 @@
+# Video extension temporary files
+.gemini/
+temp_py_ext/
+uploads/
+frames/
+*.webm
+*.wav
+*.mp4
+
+# FFmpeg binaries (large files - users should download separately)
+bin/
+ffmpeg.exe
+ffprobe.exe
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+.venv/
+pip-log.txt
+pip-delete-this-directory.txt
+.tox/
+.coverage
+.pytest_cache/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
