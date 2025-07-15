@@ -540,13 +540,13 @@ def generate_context(duration, transcript, frame_data, timeline_viz=None, ai_ana
         ""
     ]
     
-    # Save word timeline as CSV file and reference it
+    # Save word timeline as simple CSV file
     if has_audio and transcript_result:
         word_timeline = create_word_timeline_table(transcript_result)
         if word_timeline:
-            # Create CSV content
-            csv_content = "time_seconds,word\n"
-            for entry in word_timeline[:50]:  # Limit to 50 words
+            # Create simple CSV content - no headers, just comma-delimited
+            csv_content = ""
+            for entry in word_timeline:
                 csv_content += f"{entry['time']:.1f},{entry['word']}\n"
             
             # Save CSV file in session directory
@@ -559,29 +559,11 @@ def generate_context(duration, transcript, frame_data, timeline_viz=None, ai_ana
                 # Reference the CSV file
                 csv_relative_path = os.path.relpath(csv_file, os.getcwd()).replace('\\', '/')
                 context_lines.extend([
-                    "## Word Timeline (CSV)",
-                    f"Word-by-word timing data: @{csv_relative_path}",
+                    "## Word Timeline",
+                    f"Time,word data: @{csv_relative_path}",
                     ""
                 ])
     
-    # Speech analysis - key moments
-    problems_identified = []
-    if has_audio and transcript_result:
-        speech_analysis = analyze_speech_for_frame_requests(transcript_result, duration)
-        if speech_analysis:
-            context_lines.extend([
-                "## Key Moments Detected"
-            ])
-            
-            for i, moment in enumerate(speech_analysis):
-                time_str = f"{moment['timestamp']:.1f}s"
-                context_lines.append(f"{i+1}. Time {time_str}: {moment['context']}")
-                problems_identified.append({
-                    'time': moment['timestamp'],
-                    'description': moment['context']
-                })
-            
-            context_lines.append("")
     
     # Complete transcript
     if transcript and transcript != "[No audio detected]" and transcript != "[No speech detected]":
@@ -611,20 +593,11 @@ def generate_context(duration, transcript, frame_data, timeline_viz=None, ai_ana
     context_lines.append("")
     
     # Simple analysis request
-    if problems_identified:
-        context_lines.extend([
-            "## Analysis Request",
-            f"I detected {len(problems_identified)} key moments in the speech.",
-            "Please analyze the available frames and transcript to:",
-            "1. Identify what specific problems are shown",
-            "2. Match each problem to the correct time/frame",
-            f"3. If you need frames at different times (like {', '.join([f'{p['time']:.1f}s' for p in problems_identified])}), let me know"
-        ])
-    else:
-        context_lines.extend([
-            "## Analysis Request", 
-            "Please analyze the frames and transcript to understand what the user needs help with."
-        ])
+    context_lines.extend([
+        "## Analysis Request", 
+        "Please analyze the word timeline, transcript, and frames to understand what the user needs help with.",
+        "If you need frames at specific times, let me know the timestamps."
+    ])
     
     return '\n'.join(context_lines)
 
