@@ -22,31 +22,7 @@ from werkzeug.utils import secure_filename
 import whisper
 import ffmpeg
 
-
-# FFmpeg configuration - use local binaries if available
-def get_ffmpeg_path():
-    """Get FFmpeg executable path, prefer local bin directory"""
-    script_dir = Path(__file__).parent
-    local_ffmpeg = script_dir / 'bin' / 'ffmpeg.exe'
-    
-    if local_ffmpeg.exists():
-        return str(local_ffmpeg)
-    
-    # Fallback to system PATH
-    return 'ffmpeg'
-
-
-def get_ffprobe_path():
-    """Get FFprobe executable path, prefer local bin directory"""
-    script_dir = Path(__file__).parent
-    local_ffprobe = script_dir / 'bin' / 'ffprobe.exe'
-    
-    if local_ffprobe.exists():
-        return str(local_ffprobe)
-    
-    # Fallback to system PATH
-    return 'ffprobe'
-
+from frame_extractor import extract_frames, get_ffmpeg_path, get_ffprobe_path
 
 # Set FFmpeg paths for ffmpeg-python
 ffmpeg_path = get_ffmpeg_path()
@@ -68,12 +44,15 @@ if bin_dir.exists():
 
 # Configuration
 CONFIG = {
-    'MAX_RECORDING_DURATION': 30,  # seconds
-    'FRAME_TIMESTAMPS': [2, 7, 12, 17, 22, 27],  # seconds
+    'MAX_RECORDING_DURATION': 30,
     'PORT': 8765,
     'UPLOAD_FOLDER': 'uploads',
     'FRAMES_FOLDER': 'frames',
-    'WHISPER_MODEL': 'base'  # Options: tiny, base, small, medium, large
+    'WHISPER_MODEL': 'base',
+    'MAX_FRAMES': 6,
+    'MIN_FRAMES': 2,
+    'AI_ANALYSIS_TIMEOUT': 30,
+    'SILENT_VIDEO_INTERVALS': [2, 7, 12, 17, 22]  # For videos without audio
 }
 
 # Global variables
@@ -89,10 +68,9 @@ def create_session_directory():
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
     session_id = f"video_session_{timestamp}"
     
-    # Use current working directory with .gemini folder for CLI agent compatibility
+    # Create the session directory in current working directory
     current_dir = Path.cwd()
-    gemini_dir = current_dir / '.gemini'
-    session_path = gemini_dir / 'video_ext' / session_id
+    session_path = current_dir / '.gemini' / 'video_ext' / session_id
     
     # Create directory structure
     session_path.mkdir(parents=True, exist_ok=True)
@@ -137,116 +115,179 @@ def get_video_duration(video_path):
     return 5.0  # Fallback
 
 
-def extract_frames_intelligent(video_path, frames_dir, duration, transcript_result=None):
-    """Extract frames intelligently based on transcript, or use default intervals"""
-    extracted_frames = []
-    frames_path = Path(frames_dir)
-    
-    if transcript_result and 'segments' in transcript_result and len(transcript_result['segments']) > 0:
-        # INTELLIGENT MODE: Extract frames based on speech segments
-        segments = transcript_result['segments']
-        
-        # Use actual video duration from segments if longer than detected duration
-        max_segment_end = max(segment['end'] for segment in segments)
-        actual_duration = max(duration, max_segment_end)
-        
-        for i, segment in enumerate(segments):
-            # Use middle of segment for better context
-            segment_start = float(segment['start'])
-            segment_end = float(segment['end'])
-            timestamp = (segment_start + segment_end) / 2.0
-            
-            # Ensure timestamp is within video bounds
-            if timestamp >= actual_duration:
-                timestamp = max(0.0, actual_duration - 1.0)
-            
-            # Use the calculated midpoint timestamp for filename
-            frame_filename = f"intelligent_segment_{i+1}_at_{timestamp:.1f}s.png"
-            frame_path = frames_path / frame_filename
-            
-            try:
-                (
-                    ffmpeg
-                    .input(str(video_path), ss=timestamp)
-                    .output(str(frame_path), vframes=1)
-                    .overwrite_output()
-                    .run(capture_stdout=True, capture_stderr=True, cmd=ffmpeg_path)
-                )
-                
-                if frame_path.exists():
-                    extracted_frames.append({
-                        'path': str(frame_path),
-                        'timestamp': timestamp,
-                        'type': 'intelligent',
-                        'segment_text': segment['text'].strip(),
-                        'segment_index': i,
-                        'actual_duration': actual_duration  # Store for context generation
-                    })
-            except:
-                pass  # Silent failure
-    
-    else:
-        # DEFAULT MODE: Use standard intervals when no audio/transcript
-        valid_timestamps = [ts for ts in CONFIG['FRAME_TIMESTAMPS'] if ts < duration]
-        
-        if not valid_timestamps and duration > 0:
-            valid_timestamps = [min(2, duration - 0.5)] if duration >= 1 else [duration / 2]
-        
-        for timestamp in valid_timestamps:
-            frame_filename = f"standard_{timestamp:02d}s.png"
-            frame_path = frames_path / frame_filename
-            
-            try:
-                (
-                    ffmpeg
-                    .input(str(video_path), ss=timestamp)
-                    .output(str(frame_path), vframes=1)
-                    .overwrite_output()
-                    .run(capture_stdout=True, capture_stderr=True, cmd=ffmpeg_path)
-                )
-                
-                if frame_path.exists():
-                    extracted_frames.append({
-                        'path': str(frame_path),
-                        'timestamp': timestamp,
-                        'type': 'standard',
-                        'segment_text': None,
-                        'segment_index': None
-                    })
-            except:
-                pass  # Silent failure
-    
-    return extracted_frames
+# Frame extraction function is now imported from frame_extractor.py
 
 
 def extract_audio(video_path, audio_path):
     """Extract audio from video for transcription"""
     try:
+        # First check if video file exists and has content
+        video_file = Path(video_path)
+        if not video_file.exists() or video_file.stat().st_size < 1000:
+            return False
+        
+        # Use ffmpeg-python to extract audio
         (
             ffmpeg
-            .input(video_path)
+            .input(str(video_path))
             .output(str(audio_path), acodec='pcm_s16le', ar=16000, ac=1)
             .overwrite_output()
             .run(capture_stdout=True, capture_stderr=True, cmd=ffmpeg_path)
         )
-        return True
-    except Exception:
-        return False
+        
+        # Verify the audio file was created and has content
+        audio_file = Path(audio_path)
+        if audio_file.exists() and audio_file.stat().st_size > 1000:
+            return True
+        else:
+            return False
+            
+    except Exception as e:
+        # Try fallback method with direct subprocess
+        try:
+            import subprocess
+            cmd = [
+                ffmpeg_path, '-i', str(video_path),
+                '-acodec', 'pcm_s16le', '-ar', '16000', '-ac', '1',
+                '-y', str(audio_path)
+            ]
+            result = subprocess.run(cmd, capture_output=True, text=True)
+            
+            # Check if output file exists and has content
+            audio_file = Path(audio_path)
+            return audio_file.exists() and audio_file.stat().st_size > 1000
+            
+        except Exception:
+            return False
+
+
+def create_word_timeline_table(transcript_result):
+    """Create a clean word-level timeline table"""
+    if not transcript_result or not transcript_result.get('segments'):
+        return None
+    
+    timeline_entries = []
+    
+    for segment in transcript_result['segments']:
+        words = segment.get('words', [])
+        if words:
+            # Use word-level timestamps
+            for word_data in words:
+                start_time = word_data.get('start', segment['start'])
+                word = word_data.get('word', '').strip()
+                if word:
+                    timeline_entries.append({
+                        'time': start_time,
+                        'word': word
+                    })
+        else:
+            # Fallback to segment level
+            timeline_entries.append({
+                'time': segment['start'],
+                'word': segment['text'].strip()
+            })
+    
+    # Sort by time
+    timeline_entries.sort(key=lambda x: x['time'])
+    
+    return timeline_entries
+
+def analyze_speech_for_frame_requests(transcript_result, duration):
+    """Analyze speech to identify key moments for frame extraction"""
+    if not transcript_result or not transcript_result.get('segments'):
+        return []
+    
+    # Keywords that indicate important moments
+    important_keywords = [
+        'problem', 'issue', 'error', 'bug', 'broken', 'wrong', 'fix', 'help',
+        'first', 'second', 'third', 'next', 'then', 'also', 'here', 'this',
+        'show', 'see', 'look', 'example', 'case', 'situation'
+    ]
+    
+    # Phrases that indicate transitions or new topics
+    transition_phrases = [
+        'now this', 'this one', 'and this', 'here is', 'look at this',
+        'the next', 'another', 'also this', 'finally', 'lastly'
+    ]
+    
+    suggested_frames = []
+    processed_segments = []
+    
+    for segment in transcript_result['segments']:
+        start_time = segment['start']
+        end_time = segment['end']
+        text = segment['text'].lower().strip()
+        
+        # Calculate score based on keywords
+        score = 0
+        found_keywords = []
+        
+        for keyword in important_keywords:
+            if keyword in text:
+                score += 2
+                found_keywords.append(keyword)
+        
+        for phrase in transition_phrases:
+            if phrase in text:
+                score += 3
+                found_keywords.append(phrase)
+        
+        # Also look for numbered items (first, second, third, etc.)
+        if any(num in text for num in ['first', 'second', 'third', 'fourth', 'fifth']):
+            score += 4
+        
+        if score > 0:
+            # Use middle of segment for frame extraction
+            frame_time = (start_time + end_time) / 2
+            
+            # Ensure we don't go beyond video duration
+            if frame_time >= duration:
+                frame_time = max(0, duration - 1)
+            
+            processed_segments.append({
+                'timestamp': frame_time,
+                'reason': f"Speech analysis: {', '.join(found_keywords[:3])}",
+                'text': segment['text'].strip(),
+                'score': score
+            })
+    
+    # Sort by score (highest first) and take top segments
+    processed_segments.sort(key=lambda x: x['score'], reverse=True)
+    
+    # Take top 5 segments or all if less than 5
+    top_segments = processed_segments[:5]
+    
+    # If we have segments, create frame requests
+    for i, seg in enumerate(top_segments):
+        suggested_frames.append({
+            'timestamp': seg['timestamp'],
+            'reason': f"Key moment {i+1}: {seg['text'][:50]}...",
+            'context': seg['text']
+        })
+    
+    return suggested_frames
 
 
 def transcribe_audio_whisper_with_segments(audio_path):
-    """Transcribe audio using OpenAI Whisper, return both formatted text and raw result"""
+    """Transcribe audio using OpenAI Whisper with word-level timestamps"""
     try:
         audio_file = Path(audio_path)
         if not audio_file.exists() or audio_file.stat().st_size == 0:
             return "[No audio detected]", None
         
-        # Load and transcribe (suppress warnings)
+        # Check if audio file has content
+        if audio_file.stat().st_size < 1000:  # Less than 1KB likely means no audio
+            return "[No audio detected]", None
+        
+        # Load and transcribe with word timestamps (suppress warnings)
         import warnings
+        import os
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
+            # Suppress CUDA warnings
+            os.environ['CUDA_VISIBLE_DEVICES'] = ''
             model = whisper.load_model(CONFIG['WHISPER_MODEL'])
-            result = model.transcribe(str(audio_path))
+            result = model.transcribe(str(audio_path), word_timestamps=True, verbose=False)
         
         # Format transcript
         if not result.get('segments') or len(result['segments']) == 0:
@@ -266,8 +307,154 @@ def transcribe_audio_whisper_with_segments(audio_path):
         final_transcript = '\n'.join(formatted_transcript) if formatted_transcript else "[No speech detected]"
         return final_transcript, result
     
-    except Exception:
-        return "[Error in recording, please try again]", None
+    except Exception as e:
+        return f"[Transcription error: {str(e)}]", None
+
+
+def detect_available_cli_agents():
+    """Detect available CLI agents (Gemini, Claude, etc.)"""
+    agents = {}
+    
+    # Check for Gemini CLI
+    try:
+        result = subprocess.run(['gemini', '--version'], capture_output=True, text=True, timeout=5)
+        if result.returncode == 0:
+            agents['gemini'] = {
+                'command': 'gemini',
+                'available': True,
+                'version': result.stdout.strip()
+            }
+    except (subprocess.CalledProcessError, FileNotFoundError, subprocess.TimeoutExpired):
+        agents['gemini'] = {'available': False}
+    
+    # Check for Claude CLI
+    try:
+        result = subprocess.run(['claude', '--version'], capture_output=True, text=True, timeout=5)
+        if result.returncode == 0:
+            agents['claude'] = {
+                'command': 'claude',
+                'available': True,
+                'version': result.stdout.strip()
+            }
+    except (subprocess.CalledProcessError, FileNotFoundError, subprocess.TimeoutExpired):
+        agents['claude'] = {'available': False}
+    
+    return agents
+
+
+def create_ai_analysis_prompt(transcript_data, timeline_viz, duration):
+    """Create AI analysis prompt for intelligent frame extraction"""
+    if not transcript_data or not transcript_data.get('segments'):
+        return None
+    
+    # Build detailed segments breakdown
+    segments_breakdown = []
+    for i, segment in enumerate(transcript_data['segments']):
+        start_time = segment['start']
+        end_time = segment['end']
+        text = segment['text'].strip()
+        segments_breakdown.append(f"Segment {i+1}: {start_time:.1f}s - {end_time:.1f}s: \"{text}\"")
+    
+    prompt = f"""# Intelligent Frame Extraction Analysis
+
+I have a {duration:.1f}-second screen recording with the following transcript and timeline:
+
+## Visual Timeline
+```
+{timeline_viz['full_timeline'] if timeline_viz else 'Timeline visualization not available'}
+```
+
+## Detailed Segments
+{chr(10).join(segments_breakdown)}
+
+**Task**: Analyze this transcript to identify optimal frame extraction points that would best represent the distinct issues, features, or topics the user is discussing.
+
+**Guidelines**:
+1. Identify distinct problems/topics/segments in the user's speech
+2. For each segment, suggest a timestamp (in seconds) that would capture the most relevant visual context
+3. Aim for 3-6 frames total, focusing on moments when the user is:
+   - Pointing out specific issues
+   - Demonstrating features or problems  
+   - Showing different screens/sections
+   - Beginning to discuss new topics
+
+**Response Format**:
+Please respond with ONLY a JSON object in this exact format:
+```json
+{{
+  "reasoning": "Brief explanation of your analysis",
+  "suggested_frames": [
+    {{"timestamp": 1.5, "reason": "User pointing out specific issue"}},
+    {{"timestamp": 8.5, "reason": "Demonstrating feature problem"}},
+    {{"timestamp": 15.0, "reason": "Showing different section"}}
+  ],
+  "total_issues_identified": 3
+}}
+```"""
+    
+    return prompt
+
+
+def call_ai_for_frame_analysis(transcript_data, timeline_viz, duration, cli_agents):
+    """Call available CLI agent for frame analysis"""
+    
+    prompt = create_ai_analysis_prompt(transcript_data, timeline_viz, duration)
+    if not prompt:
+        return None
+    
+    # Try Claude first, then Gemini
+    for agent_name in ['claude', 'gemini']:
+        if agent_name in cli_agents and cli_agents[agent_name].get('available'):
+            try:
+                # Create temporary prompt file
+                temp_dir = session_dir / 'temp'
+                temp_dir.mkdir(exist_ok=True)
+                
+                prompt_file = temp_dir / 'frame_analysis_prompt.md'
+                with open(prompt_file, 'w', encoding='utf-8') as f:
+                    f.write(prompt)
+                
+                # Call the CLI agent
+                if agent_name == 'claude':
+                    cmd = ['claude', 'code', f'@{prompt_file}']
+                else:  # gemini
+                    cmd = ['gemini', f'@{prompt_file}']
+                
+                result = subprocess.run(cmd, capture_output=True, text=True, timeout=CONFIG['AI_ANALYSIS_TIMEOUT'])
+                
+                if result.returncode == 0 and result.stdout.strip():
+                    # Parse JSON response
+                    try:
+                        response_text = result.stdout.strip()
+                        
+                        # Extract JSON from response
+                        json_start = response_text.find('{')
+                        json_end = response_text.rfind('}') + 1
+                        
+                        if json_start != -1 and json_end != -1:
+                            json_str = response_text[json_start:json_end]
+                            analysis_result = json.loads(json_str)
+                            
+                            # Validate and limit frame count
+                            if 'suggested_frames' in analysis_result and isinstance(analysis_result['suggested_frames'], list):
+                                frames = analysis_result['suggested_frames']
+                                
+                                # Limit frame count
+                                if len(frames) > CONFIG['MAX_FRAMES']:
+                                    frames = frames[:CONFIG['MAX_FRAMES']]
+                                    analysis_result['suggested_frames'] = frames
+                                
+                                # Ensure minimum frames
+                                if len(frames) >= CONFIG['MIN_FRAMES']:
+                                    return analysis_result
+                    
+                    except json.JSONDecodeError:
+                        pass  # Try next agent
+                
+            except (subprocess.TimeoutExpired, subprocess.CalledProcessError, FileNotFoundError):
+                pass  # Try next agent
+    
+    return None
 
 
 def process_video(video_path):
@@ -278,128 +465,166 @@ def process_video(video_path):
         # Get video duration
         duration = get_video_duration(video_path)
         
-        # Extract and transcribe audio first (to inform intelligent frame extraction)
+        # Extract and transcribe audio
         audio_path = session_dir / 'audio.wav'
         transcript_result = None
         transcript_text = "[No audio detected]"
+        has_audio = False
         
         if extract_audio(video_path, audio_path):
             if audio_path.exists() and audio_path.stat().st_size > 0:
-                # Transcribe audio and get full result for intelligent processing
+                # We have audio, try to transcribe it
+                has_audio = True
                 transcript_text, transcript_result = transcribe_audio_whisper_with_segments(audio_path)
             else:
                 transcript_text = "[Audio extraction failed]"
         else:
             transcript_text = "[No audio track in video]"
         
-        # Extract frames intelligently based on transcript (or use defaults)
+        # Use speech analysis for intelligent frame extraction
+        ai_analysis = None
+        if has_audio and transcript_result and transcript_result.get('segments'):
+            # Use our own speech analysis instead of external AI
+            suggested_frames = analyze_speech_for_frame_requests(transcript_result, duration)
+            if suggested_frames:
+                ai_analysis = {
+                    'suggested_frames': suggested_frames,
+                    'reasoning': 'Speech analysis identified key moments',
+                    'total_issues_identified': len(suggested_frames)
+                }
+        
+        # Extract frames based on what we have
         frames_dir = session_dir / CONFIG['FRAMES_FOLDER']
         
-        # If we have transcript segments, extract frames for ALL segments
-        if transcript_result and 'segments' in transcript_result and len(transcript_result['segments']) > 0:
-            # Use the actual duration from transcript for better accuracy
+        # Use actual duration from transcript for better accuracy (if available)
+        actual_duration = duration
+        if has_audio and transcript_result and transcript_result.get('segments'):
             max_segment_end = max(segment['end'] for segment in transcript_result['segments'])
             actual_duration = max(duration, max_segment_end)
-            extracted_frames = extract_frames_intelligent(video_path, frames_dir, actual_duration, transcript_result)
-        else:
-            extracted_frames = extract_frames_intelligent(video_path, frames_dir, duration, transcript_result)
         
-        # Generate context with intelligent formatting
-        context = generate_context_intelligent(duration, transcript_text, extracted_frames)
+        extracted_frames = extract_frames(video_path, frames_dir, actual_duration, ai_analysis, transcript_result, has_audio, CONFIG)
+        
+        # Generate context
+        context = generate_context(actual_duration, transcript_text, extracted_frames, None, ai_analysis, has_audio, transcript_result)
         
         context_result = context
         processing_complete = True
         
         # Shutdown server after processing
         if server_process:
-            Thread(target=shutdown_server, daemon=True).start()
+            server_process.shutdown()
         
         return context
         
     except Exception as e:
-        import traceback
-        error_details = traceback.format_exc()
-        print(f"ERROR in process_video: {str(e)}", file=sys.stderr)
-        print(f"Full traceback: {error_details}", file=sys.stderr)
-        
-        error_msg = f"Error in recording: {str(e)}"
+        error_msg = "Error in recording, please try again"
         context_result = error_msg
         processing_complete = True
         
         # Shutdown server even on error
         if server_process:
-            Thread(target=shutdown_server, daemon=True).start()
+            server_process.shutdown()
         
         return error_msg
 
 
-def shutdown_server():
-    """Shutdown the Flask server after a brief delay"""
-    time.sleep(2)  # Give time for final HTTP response
-    if server_process:
-        server_process.shutdown()
-    # Don't force exit - let main() handle the output
 
 
-def generate_context_intelligent(duration, transcript, frame_data):
-    """Generate markdown context for CLI agent with intelligent or standard frames"""
-    
-    # Determine extraction mode
-    has_intelligent_frames = any(frame.get('type') == 'intelligent' for frame in frame_data)
+
+def generate_context(duration, transcript, frame_data, timeline_viz=None, ai_analysis=None, has_audio=True, transcript_result=None):
+    """Generate clean, CSV-based context for CLI agent"""
     
     context_lines = [
-        "# Video Recording Context",
-        "",
-        "## Visual Context",
+        "# Video Recording Analysis",
+        f"Duration: {duration:.1f}s | Frames: {len(frame_data)} | Audio: {'Yes' if has_audio else 'No'}",
         ""
     ]
+    
+    # Save word timeline as CSV file and reference it
+    if has_audio and transcript_result:
+        word_timeline = create_word_timeline_table(transcript_result)
+        if word_timeline:
+            # Create CSV content
+            csv_content = "time_seconds,word\n"
+            for entry in word_timeline[:50]:  # Limit to 50 words
+                csv_content += f"{entry['time']:.1f},{entry['word']}\n"
+            
+            # Save CSV file in session directory
+            global session_dir
+            if session_dir:
+                csv_file = session_dir / "word_timeline.csv"
+                with open(csv_file, 'w', encoding='utf-8') as f:
+                    f.write(csv_content)
+                
+                # Reference the CSV file
+                csv_relative_path = os.path.relpath(csv_file, os.getcwd()).replace('\\', '/')
+                context_lines.extend([
+                    "## Word Timeline (CSV)",
+                    f"Word-by-word timing data: @{csv_relative_path}",
+                    ""
+                ])
+    
+    # Speech analysis - key moments
+    problems_identified = []
+    if has_audio and transcript_result:
+        speech_analysis = analyze_speech_for_frame_requests(transcript_result, duration)
+        if speech_analysis:
+            context_lines.extend([
+                "## Key Moments Detected"
+            ])
+            
+            for i, moment in enumerate(speech_analysis):
+                time_str = f"{moment['timestamp']:.1f}s"
+                context_lines.append(f"{i+1}. Time {time_str}: {moment['context']}")
+                problems_identified.append({
+                    'time': moment['timestamp'],
+                    'description': moment['context']
+                })
+            
+            context_lines.append("")
+    
+    # Complete transcript
+    if transcript and transcript != "[No audio detected]" and transcript != "[No speech detected]":
+        context_lines.extend([
+            "## Transcript",
+            transcript,
+            ""
+        ])
+    
+    # Visual frames
+    context_lines.extend([
+        "## Available Frames"
+    ])
     
     for i, frame in enumerate(frame_data):
         timestamp = frame['timestamp']
         frame_path = frame['path']
         
         # Format timestamp
-        minutes = int(timestamp // 60)
-        seconds = int(timestamp % 60)
-        formatted_timestamp = f"{minutes:02d}:{seconds:02d}"
+        formatted_timestamp = f"{timestamp:.1f}s"
         
-        # Get relative path and format for Gemini with @
+        # Get relative path
         relative_path = os.path.relpath(frame_path, os.getcwd()).replace('\\', '/')
         
-        context_lines.append(f"### Frame {i+1} - Time: {formatted_timestamp}")
-        
-        # Add speech context if this is an intelligent frame
-        if frame.get('type') == 'intelligent' and frame.get('segment_text'):
-            context_lines.append(f"**Speech Context**: \"{frame['segment_text']}\"")
-            context_lines.append("")
-        
-        # Add image reference in Gemini format
-        context_lines.append(f"@{relative_path}")
-        context_lines.append("")
-        context_lines.append("---")
-        context_lines.append("")
+        context_lines.append(f"Frame {i+1} at {formatted_timestamp}: @{relative_path}")
     
-    context_lines.extend([
-        "## Audio Transcript",
-        "",
-        "```",
-        transcript,
-        "```",
-        "",
-        "## Instructions",
-        "",
-        "Please analyze the provided frame images and transcript to understand the developer's request."
-    ])
+    context_lines.append("")
     
-    if has_intelligent_frames:
-        context_lines.append("Each frame corresponds to a specific speech segment, showing the application state when the user mentioned different issues or requirements.")
+    # Simple analysis request
+    if problems_identified:
+        context_lines.extend([
+            "## Analysis Request",
+            f"I detected {len(problems_identified)} key moments in the speech.",
+            "Please analyze the available frames and transcript to:",
+            "1. Identify what specific problems are shown",
+            "2. Match each problem to the correct time/frame",
+            f"3. If you need frames at different times (like {', '.join([f'{p['time']:.1f}s' for p in problems_identified])}), let me know"
+        ])
     else:
-        context_lines.append("The frames show the application state at different time intervals during the recording.")
-    
-    context_lines.extend([
-        "Use this visual and audio context to implement the requested changes or fixes.",
-        ""
-    ])
+        context_lines.extend([
+            "## Analysis Request", 
+            "Please analyze the frames and transcript to understand what the user needs help with."
+        ])
     
     return '\n'.join(context_lines)
 
@@ -669,11 +894,7 @@ def upload_video():
         return jsonify({'message': 'Video uploaded successfully, processing started'})
         
     except Exception as e:
-        import traceback
-        error_details = traceback.format_exc()
-        print(f"ERROR in upload_video: {str(e)}", file=sys.stderr)
-        print(f"Full traceback: {error_details}", file=sys.stderr)
-        return jsonify({'error': f'Upload failed: {str(e)}'}), 500
+        return jsonify({'error': 'Upload failed'}), 500
 
 
 @app.route('/status')
@@ -685,15 +906,17 @@ def get_status():
 
 
 def cleanup_session():
-    """Clean up session directory - DISABLED FOR DEBUGGING"""
+    """Clean up session directory"""
     global session_dir
-    # Keep files for debugging - no cleanup
-    pass
+    if session_dir and session_dir.exists():
+        try:
+            shutil.rmtree(session_dir)
+        except Exception:
+            pass  # Silent cleanup
 
 
 def signal_handler(signum, frame):
     """Handle termination signals"""
-    print(f"\nReceived signal {signum}, cleaning up...")
     cleanup_session()
     sys.exit(0)
 
@@ -701,10 +924,6 @@ def signal_handler(signum, frame):
 def start_server():
     """Start the Flask server"""
     global session_dir, server_process
-    
-    # Setup signal handlers
-    signal.signal(signal.SIGINT, signal_handler)
-    signal.signal(signal.SIGTERM, signal_handler)
     
     # Create session directory
     session_dir = create_session_directory()
@@ -720,10 +939,23 @@ def start_server():
 
 
 def open_browser():
-    """Open browser to recording interface"""
+    """Open browser to recording interface with retry mechanism"""
+    import requests
     url = f"http://localhost:{CONFIG['PORT']}?autostart=true"
-    time.sleep(1)  # Give server time to start
-    webbrowser.open(url)
+    max_retries = 10
+    retry_delay = 1  # seconds
+
+    for i in range(max_retries):
+        try:
+            response = requests.get(url, timeout=1)
+            if response.status_code == 200:
+                webbrowser.open(url)
+                return
+        except requests.exceptions.ConnectionError:
+            pass  # Server not ready yet
+        except Exception:
+            pass  # Other error, continue trying
+        time.sleep(retry_delay)
 
 
 def main():
@@ -731,6 +963,10 @@ def main():
     global processing_complete, context_result
     
     try:
+        # Setup signal handlers
+        signal.signal(signal.SIGINT, signal_handler)
+        signal.signal(signal.SIGTERM, signal_handler)
+
         # Check if required modules are available
         import whisper
         import ffmpeg
@@ -739,34 +975,37 @@ def main():
         # Start browser opener in background
         Thread(target=open_browser, daemon=True).start()
         
-        # Start server (this will block) - completely silent
-        try:
-            start_server()
-        except KeyboardInterrupt:
-            return  # Silent exit on Ctrl+C
-        except Exception as e:
-            print(f"Server error: {str(e)}")
-            return
-        finally:
-            # Wait for processing to complete
-            while not processing_complete:
-                time.sleep(0.1)
+        # Start server in a separate thread
+        server_thread = Thread(target=start_server, daemon=True)
+        server_thread.start()
+
+        # Wait for processing to complete
+        while not processing_complete:
+            time.sleep(0.1)
+        
+        # Write context to file and output the content
+        if context_result and context_result != "Error in recording, please try again later":
+            context_file = session_dir / "context.md"
+            with open(context_file, "w", encoding="utf-8") as f:
+                f.write(context_result)
             
-            # Output ONLY the context - no headers or decorations
-            if context_result and not context_result.startswith("Error"):
-                print(context_result)
-            elif context_result:
-                print(context_result)
-            
-            cleanup_session()
+            # Print the context content to stdout for Gemini
+            print(context_result)
+        else:
+            print("Video recording failed. Please try again.")
+        
+        # Don't cleanup immediately - let user see the files
+        # cleanup_session()
             
     except ImportError as e:
-        print(f"Missing dependency: {str(e)}")
-        print("Please run: python cli_video_ext.py install")
-        return
+        print("Missing dependency. Please install required packages.")
+        sys.exit(1)
     except Exception as e:
-        print(f"Error in recording: {str(e)}")
-        return
+        print("Video recording failed. Please try again.")
+        sys.exit(1)
+    finally:
+        if server_process:
+            server_process.shutdown()
 
 
 if __name__ == '__main__':

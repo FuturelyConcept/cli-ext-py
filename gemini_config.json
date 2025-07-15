@@ -1,0 +1,40 @@
+{
+  "name": "video-recording-extension",
+  "version": "1.0.0",
+  "description": "AI-guided video recording extension for Gemini CLI",
+  "commands": {
+    "video": {
+      "description": "Record screen video with intelligent frame extraction",
+      "command": "python3 gemini_video_handler.py record",
+      "timeout": 300,
+      "examples": [
+        "start a video recording and i will tell you the problem i want you to solve",
+        "record a video to show you the bug",
+        "let me record my screen to demonstrate the issue"
+      ]
+    }
+  },
+  "triggers": {
+    "video_recording": {
+      "patterns": [
+        "start a video recording",
+        "record a video",
+        "video recording",
+        "show you the problem",
+        "demonstrate the issue",
+        "record my screen"
+      ],
+      "handler": "gemini_video_handler.py",
+      "method": "handle_video_request"
+    }
+  },
+  "setup": {
+    "dependencies": [
+      "python3",
+      "flask",
+      "openai-whisper",
+      "ffmpeg-python"
+    ],
+    "installation": "python3 cli_video_ext.py install"
+  }
+}

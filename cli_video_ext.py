@@ -65,15 +65,47 @@ def install_dependencies():
     print("Installing required dependencies...")
     
     requirements_file = Path(__file__).parent / 'requirements.txt'
-    if requirements_file.exists():
-        subprocess.run([sys.executable, '-m', 'pip', 'install', '-r', str(requirements_file)], check=True)
-    else:
-        # Install individually
-        deps = ['flask==2.3.3', 'openai-whisper==20231117', 'ffmpeg-python==0.2.0', 'werkzeug==2.3.7']
-        for dep in deps:
-            subprocess.run([sys.executable, '-m', 'pip', 'install', dep], check=True)
     
-    print("Dependencies installed successfully!")
+    try:
+        if requirements_file.exists():
+            subprocess.run([sys.executable, '-m', 'pip', 'install', '-r', str(requirements_file), '--user'], check=True)
+        else:
+            # Install individually with better compatibility
+            deps = ['flask', 'openai-whisper', 'ffmpeg-python', 'werkzeug']
+            for dep in deps:
+                print(f"Installing {dep}...")
+                subprocess.run([sys.executable, '-m', 'pip', 'install', dep, '--user'], check=True)
+        
+        print("Dependencies installed successfully!")
+        
+    except subprocess.CalledProcessError as e:
+        print(f"Error installing dependencies: {e}")
+        print("Trying alternative installation method...")
+        
+        # Try individual installation with more flexibility
+        deps = ['flask', 'openai-whisper', 'ffmpeg-python', 'werkzeug']
+        success_count = 0
+        
+        for dep in deps:
+            try:
+                print(f"Installing {dep}...")
+                subprocess.run([sys.executable, '-m', 'pip', 'install', dep, '--user'], check=True)
+                success_count += 1
+                print(f"✅ {dep} installed successfully")
+            except subprocess.CalledProcessError:
+                print(f"⚠️ {dep} had installation issues, trying without user flag...")
+                try:
+                    subprocess.run([sys.executable, '-m', 'pip', 'install', dep], check=True)
+                    success_count += 1
+                    print(f"✅ {dep} installed successfully")
+                except subprocess.CalledProcessError:
+                    print(f"❌ Failed to install {dep}")
+        
+        if success_count >= 3:  # If most dependencies installed
+            print(f"✅ {success_count}/{len(deps)} dependencies installed successfully!")
+        else:
+            print(f"❌ Only {success_count}/{len(deps)} dependencies installed")
+            raise e
 
 
 def record_video():
@@ -127,20 +159,20 @@ Integration with CLI agents:
     if args.command == 'check':
         missing = check_dependencies()
         if missing:
-            print("❌ Missing dependencies:")
+            print("Missing dependencies:")
             for dep in missing:
                 print(f"  - {dep}")
             print("\nRun 'python cli_video_ext.py install' to install missing dependencies.")
             return 1
         else:
-            print("✅ All dependencies are installed!")
+            print("All dependencies are installed!")
             return 0
     
     elif args.command == 'install':
         try:
             missing = check_dependencies()
             if 'ffmpeg (system)' in missing:
-                print("⚠️  System ffmpeg not found!")
+                print("System ffmpeg not found!")
                 print("Please install ffmpeg:")
                 print("  - Windows: Download from https://ffmpeg.org/download.html")
                 print("  - macOS: brew install ffmpeg")
@@ -153,23 +185,23 @@ Integration with CLI agents:
             # Check again
             missing = check_dependencies()
             if missing:
-                print("❌ Some dependencies are still missing:")
+                print("Some dependencies are still missing:")
                 for dep in missing:
                     print(f"  - {dep}")
                 return 1
             else:
-                print("✅ All Python dependencies installed successfully!")
+                print("All Python dependencies installed successfully!")
                 return 0
                 
         except Exception as e:
-            print(f"❌ Installation failed: {e}")
+            print(f"Installation failed: {e}")
             return 1
     
     elif args.command == 'record':
         # Check dependencies first
         missing = check_dependencies()
         if missing:
-            print("❌ Missing dependencies. Please install them first:")
+            print("Missing dependencies. Please install them first:")
             for dep in missing:
                 print(f"  - {dep}")
             print("\nRun 'python cli_video_ext.py install' to install missing dependencies.")

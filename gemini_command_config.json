@@ -1,0 +1,8 @@
+{
+  "video_recording": {
+    "command": "python C:\\Users\\Deepika_Akshaj\\.gemini\\video-recording\\record_video.py",
+    "description": "Record screen video with AI-guided frame extraction",
+    "working_directory": "C:\\Users\\Deepika_Akshaj\\.gemini\\video-recording",
+    "type": "video_capture"
+  }
+}

@@ -1,4 +1,4 @@
-flask==2.3.3
-openai-whisper==20231117
-ffmpeg-python==0.2.0
-werkzeug==2.3.7
+flask>=2.3.3
+openai-whisper
+ffmpeg-python>=0.2.0
+werkzeug>=2.3.7
