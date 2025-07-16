@@ -120,7 +120,12 @@ def record_video():
         
         # Run the video recorder - output goes directly to stdout
         result = subprocess.run([sys.executable, str(video_recorder_path)], 
-                              capture_output=False, text=True)
+                              capture_output=True, text=True)
+        
+        if result.stdout:
+            print(result.stdout.strip())
+        if result.stderr:
+            print(result.stderr.strip(), file=sys.stderr)
         
         return result.returncode
         

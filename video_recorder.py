@@ -498,14 +498,10 @@ def process_video(video_path):
                     f.write(csv_content)
         
         # Generate minimal context with only CSV reference
-        context = generate_minimal_context(duration, transcript_text, csv_file, has_audio)
+        context = generate_minimal_context(duration, transcript_text, csv_file, video_path, has_audio)
         
         context_result = context
         processing_complete = True
-        
-        # Shutdown server after processing
-        if server_process:
-            server_process.shutdown()
         
         return context
         
@@ -524,17 +520,19 @@ def process_video(video_path):
 
 
 
-def generate_minimal_context(duration, transcript, csv_file, has_audio):
+def generate_minimal_context(duration, transcript, csv_file, video_path, has_audio):
     """Generate minimal context for CLI agent - Step 1 of two-step workflow"""
-    
+
     # Build simple output with only CSV reference
-    output = ""
-    
+    output_data = {}
+
     if csv_file and csv_file.exists():
-        csv_path = os.path.relpath(csv_file, os.getcwd()).replace('\\', '/')
-        output = f"@{csv_path}"
-    
-    return output
+        output_data["WORD_TIMELINE_PATH"] = str(csv_file.absolute())
+
+    if video_path and Path(video_path).exists():
+        output_data["VIDEO_PATH"] = str(Path(video_path).absolute())
+
+    return json.dumps(output_data)
 
 
 def generate_context(duration, transcript, frame_data, timeline_viz=None, ai_analysis=None, has_audio=True, transcript_result=None):
@@ -878,8 +876,11 @@ def start_server():
     log.setLevel(logging.ERROR)
     
     from werkzeug.serving import make_server
-    server_process = make_server('localhost', CONFIG['PORT'], app)
-    server_process.serve_forever()
+    try:
+        server_process = make_server('localhost', CONFIG['PORT'], app)
+        server_process.serve_forever()
+    except Exception as e:
+        print(f"Error starting Flask server: {e}", file=sys.stderr)
 
 
 def open_browser():
@@ -897,7 +898,8 @@ def open_browser():
                 return
         except requests.exceptions.ConnectionError:
             pass  # Server not ready yet
-        except Exception:
+        except Exception as e:
+            print(f"Error opening browser: {e}", file=sys.stderr)
             pass  # Other error, continue trying
         time.sleep(retry_delay)
 

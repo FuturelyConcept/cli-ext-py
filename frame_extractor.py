@@ -2,6 +2,9 @@ import os
 from pathlib import Path
 import subprocess
 import ffmpeg
+import argparse
+import sys
+from datetime import datetime
 
 # FFmpeg configuration - use local binaries if available
 def get_ffmpeg_path():
@@ -170,7 +173,7 @@ def extract_frames_at_timestamps(video_path, frames_dir, timestamps):
     """Extract frames at specific timestamps - Step 2 of two-step workflow"""
     extracted_frames = []
     frames_path = Path(frames_dir)
-    frames_path.mkdir(exist_ok=True)
+    frames_path.mkdir(parents=True, exist_ok=True) # Ensure parent directories are created
     
     for i, timestamp in enumerate(timestamps):
         timestamp = float(timestamp)
@@ -198,3 +201,29 @@ def extract_frames_at_timestamps(video_path, frames_dir, timestamps):
             pass
     
     return extracted_frames
+
+def main():
+    parser = argparse.ArgumentParser(description='Extract frames from a video at specified timestamps.')
+    parser.add_argument('video_path', type=str, help='Absolute path to the video file.')
+    parser.add_argument('timestamps', type=str, help='Comma-separated list of timestamps (in seconds) to extract frames.')
+    
+    args = parser.parse_args()
+
+    video_path = Path(args.video_path)
+    timestamps = [float(ts) for ts in args.timestamps.split(',')]
+
+    # Determine the session directory from the video_path
+    # Assuming video_path is something like C:/Users/Deepika_Akshaj/manoj/repos/cli-ext-py/.gemini/video_ext/video_session_YYYYMMDD_HHMMSS/uploads/recording.webm
+    # We want frames to go into C:/Users/Deepika_Akshaj/manoj/repos/cli-ext-py/.gemini/video_ext/video_session_YYYYMMDD_HHMMSS/frames/
+    
+    session_dir = video_path.parent.parent # Go up from 'uploads' to the session_id directory
+    frames_dir = session_dir / 'frames'
+    
+    extracted_frames = extract_frames_at_timestamps(video_path, frames_dir, timestamps)
+
+    # Print absolute paths of extracted frames for Gemini to read
+    for frame in extracted_frames:
+        print(f"FRAME_PATH={Path(frame['path']).absolute()}")
+
+if __name__ == '__main__':
+    main()

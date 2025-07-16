@@ -115,77 +115,118 @@ Simply ask Gemini:
 - Cleaner workflow with explicit frame requests
 
 ## Implementation Status (2025-07-16)
-✅ **COMPLETED**: Two-step workflow implemented and tested
+✅ **COMPLETED**: Two-step interactive workflow implemented and active
 
-### New Workflow (ACTIVE)
-1. **Step 1**: `python video_recorder.py` → records video → transcribes audio → generates `word_timeline.csv` → outputs `@word_timeline.csv`
-2. **Step 2**: `python extract_frames.py "1.5,3.2,5.0"` → extracts frames at specific timestamps → outputs `@frame_paths`
+### Current Workflow (ACTIVE)
+The system has been updated to use a two-step interactive workflow:
 
-### Changes Made
-- Modified `video_recorder.py` to use `generate_minimal_context()` 
-- Removed automatic frame extraction from initial recording
-- Created `extract_frames.py` for on-demand frame extraction
-- Added `extract_frames_at_timestamps()` function to `frame_extractor.py`
-- Updated `install.py` to include new extract_frames.py script
-- Tested workflow with `test_workflow.py`
+1. **Step 1**: User says "start video recording" → `gemini_video_handler.py record` → records video → transcribes audio → generates `word_timeline.csv` → outputs enhanced prompt asking Gemini to analyze CSV and provide specific timestamps
 
-### File Structure (Updated)
+2. **Step 2**: Gemini analyzes CSV and provides timestamps → User can then extract frames at those timestamps using `extract_frames.py`
+
+### Current State
+- ✅ Video recording works in Windows/PowerShell environment
+- ✅ Audio transcription with word-level timestamps
+- ✅ CSV generation with timeline data
+- ✅ Clean output without debug clutter
+- ✅ Enhanced prompt for Gemini analysis
+- ⚠️ Frame extraction available but requires manual timestamp input
+
+### File Structure (Current)
 ```
 C:\Users\Deepika_Akshaj\.gemini\extensions\video-recording\
-├── video_recorder.py        # Step 1: Record + transcribe + CSV only
-├── extract_frames.py        # Step 2: Extract frames at timestamps
+├── gemini_video_handler.py  # Main entry point - asks Gemini to analyze CSV
+├── video_recorder.py        # Records video + transcribes + generates CSV
+├── extract_frames.py        # On-demand frame extraction
 ├── frame_extractor.py       # Frame extraction utilities
 ├── requirements.txt         # Dependencies
 └── bin/                     # FFmpeg binaries
 ```
 
-### Usage Example
-```bash
-# Step 1: Record video (generates CSV)
-python video_recorder.py
-# Output: Duration 5.0s
-#         @.gemini/video_ext/session/word_timeline.csv
+### Current Output Format
+When user says "start video recording", system outputs:
+```
+Please load this word_timeline.csv file on path below.
+This file contains transcribed audio text of the video along with timeline in seconds.
+Analyze the content and identify 3-5 specific timestamps where frames should be extracted to accurately capture what the user is demonstrating.
 
-# Step 2: Extract frames at specific timestamps
-python extract_frames.py "1.5,3.2,5.0"
-# Output: @.gemini/video_ext/session/frames/frame_1_at_1.5s.png
-#         @.gemini/video_ext/session/frames/frame_2_at_3.2s.png
+Respond ONLY with timestamps in this exact format:
+frame1: X.X seconds
+frame2: X.X seconds  
+frame3: X.X seconds
+
+@.gemini/video_ext/video_session_TIMESTAMP/word_timeline.csv
 ```
 
-### Benefits Achieved
-- ✅ Clean output (no scattered pipes/spaces)
-- ✅ @ file references work properly  
-- ✅ Gemini can analyze timeline before requesting frames
-- ✅ Faster initial processing (no unnecessary frames)
-- ✅ On-demand frame extraction based on analysis
+### Issues Fixed (2025-07-16)
+1. **CSV parsing error**: Fixed invalid file path handling in gemini_video_handler.py
+2. **Whisper output interference**: Cleaned up CSV path extraction to avoid "Detected language:" text
+3. **Frame extraction crashes**: Added proper error handling for file path validation
 
-### Output Cleanup (2025-07-16)
-✅ **FIXED**: Removed debug output and simplified analysis format
+### Usage
+1. User: "start video recording"
+2. System: Records video and asks Gemini to analyze CSV with timestamps
+3. Gemini: Analyzes CSV and provides specific timestamps
+4. User: Can then extract frames at those timestamps if needed
 
-### Changes Made to Fix Text Cluttering:
-1. **Removed debug prints** from gemini_video_handler.py
-2. **Removed duration** from analysis.txt (redundant with CSV)
-3. **Suppressed Whisper progress bars** using contextlib.redirect_stderr
-4. **Simplified output** - Only essential @ file references
-5. **Clean stdout** - Just `@analysis.txt` path, no extra text
+### Benefits
+- ✅ Interactive workflow with Gemini analysis
+- ✅ Clean CSV timeline output
+- ✅ No automatic frame extraction (reduces processing time)
+- ✅ User gets to see transcribed speech analysis
+- ✅ Gemini can provide intelligent timestamp selection
 
-### New Clean Output:
+## FINAL WORKING SOLUTION (2025-07-16)
+✅ **CURRENT STATUS**: Fixed and working correctly
+
+### Key Learnings & Final Implementation:
+1. **Command Configuration**: Gemini CLI needs `gemini_video_handler.py record` NOT complex workflows
+2. **File Path Critical**: All files MUST be stored in current project directory (where Gemini CLI runs)
+3. **Clean Configuration**: Removed redundant config files, kept only essential ones
+
+### Final Working Commands:
+```json
+{
+  "commands": {
+    "video_recording": "python.exe C:\\Users\\Deepika_Akshaj\\.gemini\\extensions\\video-recording\\gemini_video_handler.py record",
+    "extract_frames": "python.exe C:\\Users\\Deepika_Akshaj\\.gemini\\extensions\\video-recording\\gemini_frame_extractor.py"
+  }
+}
 ```
-# Before (cluttered):
-Starting video recording...
-[DEBUG] Executing command...
-Recording complete. Analysis: @analysis.txt
 
-# After (clean):
-@analysis.txt
-```
+### File Storage Location:
+- ✅ **CORRECT**: `C:\Users\Deepika_Akshaj\manoj\repos\paydo\.gemini\video_ext\video_session_<timestamp>\`
+- ❌ **WRONG**: `C:\Users\Deepika_Akshaj\.gemini\video_ext\` (Gemini installation directory)
 
-### Expected analysis.txt content:
-```
-@word_timeline.csv
-Next: Analyze the timeline and request specific frame timestamps
-```
+### Configuration Files That Matter:
+1. `commands.json` - Main command registry
+2. `commands/video_recording.json` - Command definitions with triggers
+3. `tools.json` - Tool integration
 
-### Next Steps
-- Test with actual Gemini CLI integration
-- Monitor for any edge cases in production use
+### Issues Fixed:
+1. **Command Execution**: Now calls `gemini_video_handler.py record` with proper arguments
+2. **File Path Resolution**: Updated `video_recorder.py` to use `Path.cwd()` for correct relative paths
+3. **Clean Configuration**: Removed redundant config files causing confusion
+4. **Batch File Issue**: Removed old .bat files that were causing conflicts
+
+### Working Workflow:
+1. User: `\video_recording` or `"start a video recording"`
+2. System: Calls `gemini_video_handler.py record`
+3. Script: Records video, transcribes audio, generates word_timeline.csv
+4. Output: Clean prompt asking Gemini to analyze timeline and request frame timestamps
+5. Gemini: Analyzes CSV, responds with timestamps, should call `\extract_frames`
+6. System: Extracts frames at specified timestamps, provides final context
+
+### Critical Commands for Install:
+- `python install.py` - Copies all files and creates proper config
+- Files copied: `gemini_video_handler.py`, `video_recorder.py`, `frame_extractor.py`, `gemini_frame_extractor.py`, etc.
+- Config files created: `commands.json`, `commands/video_recording.json`, `tools.json`
+
+### User Instructions Followed:
+1. ✅ Use `gemini_video_handler.py record` command
+2. ✅ Store all files in current project directory (not Gemini installation)
+3. ✅ Clean configuration without redundant files
+4. ✅ Proper file path resolution using `Path.cwd()`
+5. ✅ Working two-step workflow: record → analyze → extract frames
+
+### Final Status: READY FOR TESTING

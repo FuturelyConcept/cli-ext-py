@@ -50,12 +50,16 @@ class VideoExtensionInstaller:
         
         # Files to copy from project directory
         files_to_copy = [
+            'simple_video_recorder.py',
             'video_recorder.py', 
             'frame_extractor.py',
             'extract_frames.py',
             'gemini_video_handler.py',
+            'complete_video_workflow.py',
+            'gemini_frame_extractor.py',
             'requirements.txt',
-            'cli_video_ext.py'
+            'cli_video_ext.py',
+            'gemini_command_config.json' # Add this line
         ]
         
         # Create extension directory
@@ -92,97 +96,28 @@ class VideoExtensionInstaller:
         return len(copied_files) > 0
     
     def create_main_entry_point(self, python_exe):
-        """Create the main entry point for Gemini CLI"""
-        print("Creating main entry point...")
-        
-        entry_point_code = f'''#!/usr/bin/env python3
-"""
-Video Recording Extension for Gemini CLI
-Entry point that executes from {self.extension_dir}
-"""
-
-import os
-import sys
-import subprocess
-from pathlib import Path
-
-def main():
-    """Main entry point for video recording"""
-    extension_dir = Path(__file__).parent.absolute()
-    video_recorder_path = extension_dir / "video_recorder.py"
-    
-    if not video_recorder_path.exists():
-        print("Error: video_recorder.py not found!")
-        return 1
-    
-    # Run video recorder and capture output
-    try:
-        result = subprocess.run([
-            "{python_exe}", str(video_recorder_path)
-        ], cwd=str(extension_dir), capture_output=True, text=True)
-        
-        # Print the actual video context output
-        if result.stdout:
-            print(result.stdout)
-        
-        # Handle session directory info from stderr
-        if result.stderr:
-            for line in result.stderr.split("\\n"):
-                if line.startswith("SESSION_DIR:"):
-                    session_dir = line.split(":", 1)[1].strip()
-                    context_file = Path(session_dir) / "context.md"
-                    if context_file.exists():
-                        with open(context_file, "r", encoding="utf-8") as f:
-                            print(f.read())
-        
-        return result.returncode
-    except Exception as e:
-        print(f"Error running video recorder: {{e}}")
-        return 1
-
-if __name__ == "__main__":
-    sys.exit(main())
-'''
-        
-        entry_point_path = self.extension_dir / "record_video.py"
-        with open(entry_point_path, 'w') as f:
-            f.write(entry_point_code)
-        
-        print(f"Created main entry point: {entry_point_path}")
+        """This function is no longer needed as cli_video_ext.py is the main entry point."""
+        print("Skipping creation of main entry point (record_video.py) as cli_video_ext.py is now the primary entry.")
         return True
     
     def create_gemini_extension_config(self, python_exe):
         """Create Gemini CLI extension configuration"""
         print("Creating Gemini CLI extension configuration...")
         
-        # Create the extension config that Gemini CLI will recognize
-        config = {
-            "name": "video-recording",
-            "version": "1.0.0", 
-            "description": "Record screen video with AI-guided frame extraction",
-            "commands": {
-                "record_video": {
-                    "command": f"{python_exe} {str(self.extension_dir / 'record_video.py')}",
-                    "description": "Start video recording with intelligent frame extraction",
-                    "working_directory": str(self.extension_dir)
-                }
-            }
-        }
-        
-        # Save to the main gemini directory so it gets auto-loaded
-        config_file = self.gemini_dir / "video-recording-extension.json"
-        with open(config_file, 'w') as f:
-            json.dump(config, f, indent=2)
-        
-        print(f"Created extension config: {config_file}")
-        
-        # Also create a tools.json file for tool integration
+        # Create tools.json file for tool integration
         tools_config = {
             "tools": [
                 {
                     "name": "video_recorder",
                     "description": "Record screen video and extract frames with transcription",
-                    "command": f"{python_exe} {str(self.extension_dir / 'record_video.py')}",
+                    "command": f"{python_exe} {str(self.extension_dir / 'complete_video_workflow.py')}",
+                    "parameters": [],
+                    "working_directory": str(self.extension_dir)
+                },
+                {
+                    "name": "frame_extractor",
+                    "description": "Extract frames from video at specified timestamps",
+                    "command": f"{python_exe} {str(self.extension_dir / 'gemini_frame_extractor.py')}",
                     "parameters": [],
                     "working_directory": str(self.extension_dir)
                 }
@@ -238,37 +173,13 @@ if __name__ == "__main__":
         """Register the extension with Gemini CLI for automatic recognition"""
         print("Registering extension with Gemini CLI...")
         
-        # Create extension registration with auto-detection phrases
-        extension_config = {
-            "video_recording": {
-                "command": f"python {self.extension_dir / 'record_video.py'}",
-                "description": "Record screen video with AI-guided frame extraction",
-                "category": "media",
-                "keywords": ["video", "record", "screen", "capture", "frames"],
-                "auto_detect_phrases": [
-                    "start video recording",
-                    "record my screen", 
-                    "video capture",
-                    "screen recording",
-                    "show you what I mean",
-                    "let me record this",
-                    "record this problem",
-                    "video of the issue"
-                ]
-            }
-        }
-        
-        # Save the registration
-        config_file = self.gemini_dir / "video-extension-config.json"
-        with open(config_file, 'w') as f:
-            json.dump(extension_config, f, indent=2)
+        # Skip the old extension config file - we'll use commands.json instead
         
         # Create command mappings
         command_map = {
             "commands": {
-                "record_video": f"python {self.extension_dir / 'record_video.py'}",
-                "start_video_recording": f"python {self.extension_dir / 'record_video.py'}",
-                "screen_record": f"python {self.extension_dir / 'record_video.py'}"
+                "start_video_recording": f"{python_exe} {str(self.extension_dir / 'cli_video_ext.py')} record",
+                "extract_frames": f"{python_exe} {str(self.extension_dir / 'gemini_frame_extractor.py')}"
             }
         }
         
@@ -276,8 +187,35 @@ if __name__ == "__main__":
         with open(command_file, 'w') as f:
             json.dump(command_map, f, indent=2)
         
-        print(f"Extension registered at: {config_file}")
+        # Also update the video_recording.json file
+        video_recording_file = self.gemini_dir / "commands" / "video_recording.json"
+        video_recording_file.parent.mkdir(exist_ok=True)
+        video_recording_config = {
+            "start_video_recording": {
+                "command": f"{python_exe} {str(self.extension_dir / 'cli_video_ext.py')} record",
+                "description": "Record screen video with AI-guided intelligent frame extraction",
+                "timeout": 300,
+                "working_directory": str(self.extension_dir),
+                "triggers": [
+                    "start a video recording",
+                    "record a video",
+                    "show you the problem",
+                    "demonstrate the issue",
+                    "record my screen"
+                ]
+            },
+            "extract_frames": {
+                "command": f"{python_exe} {str(self.extension_dir / 'gemini_frame_extractor.py')}",
+                "description": "Extract frames from video at specified timestamps",
+                "timeout": 60,
+                "working_directory": str(self.extension_dir)
+            }
+        }
+        with open(video_recording_file, 'w') as f:
+            json.dump(video_recording_config, f, indent=2)
+        
         print(f"Command mappings created at: {command_file}")
+        print(f"Video recording config created at: {video_recording_file}")
         return True
     
     def run_installation(self):

@@ -1,8 +1,14 @@
 {
-  "video_recording": {
-    "command": "python C:\\Users\\Deepika_Akshaj\\.gemini\\video-recording\\record_video.py",
-    "description": "Record screen video with AI-guided frame extraction",
-    "working_directory": "C:\\Users\\Deepika_Akshaj\\.gemini\\video-recording",
+  "start_video_recording": {
+    "command": "python C:\\Users\\Deepika_Akshaj\\manoj\\repos\\cli-ext-py\\cli_video_ext.py record",
+    "description": "Starts a video recording session, captures audio, and generates a word timeline.",
+    "working_directory": "C:\\Users\\Deepika_Akshaj\\manoj\\repos\\cli-ext-py",
     "type": "video_capture"
+  },
+  "extract_frames": {
+    "command": "python C:\\Users\\Deepika_Akshaj\\manoj\\repos\\cli-ext-py\\frame_extractor.py {video_path} {timestamps}",
+    "description": "Extracts frames from a video at specified timestamps.",
+    "working_directory": "C:\\Users\\Deepika_Akshaj\\manoj\\repos\\cli-ext-py",
+    "type": "utility"
   }
 }
