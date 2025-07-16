@@ -52,6 +52,8 @@ class VideoExtensionInstaller:
         files_to_copy = [
             'video_recorder.py', 
             'frame_extractor.py',
+            'extract_frames.py',
+            'gemini_video_handler.py',
             'requirements.txt',
             'cli_video_ext.py'
         ]

@@ -22,37 +22,38 @@ class GeminiVideoHandler:
     def start_recording(self):
         """Start the video recording process"""
         video_recorder_path = self.current_dir / 'video_recorder.py'
-
         command = [sys.executable, str(video_recorder_path)]
 
         try:
-            # Start the video recorder as a separate process
-            # Use Popen to run it detached, so it doesn't block the current process
             process = subprocess.Popen(
                 command,
                 stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, bufsize=1
             )
-            stdout, stderr = process.communicate(timeout=300) # 5 minutes timeout
+            stdout, stderr = process.communicate(timeout=300)
 
             if process.returncode == 0:
-                session_dir_line = next((line for line in stderr.splitlines() if line.startswith("SESSION_DIR:")), None)
-                if session_dir_line:
-                    session_dir_path = session_dir_line.replace("SESSION_DIR:", "").strip()
-                    context_file_path = Path(session_dir_path) / "analysis.txt"
-                    if context_file_path.exists():
-                        with open(context_file_path, "r", encoding="utf-8") as f:
-                            context_content = f.read()
-                        return context_content
-                    else:
-                        return "Recording failed: context file not found"
+                # Look for the CSV file reference in stdout
+                if stdout and "@" in stdout:
+                    csv_path = stdout.strip()
+                    # Create enhanced prompt for Gemini
+                    enhanced_prompt = f"""Please load this word_timeline.csv file on path below.
+This file contains transcribed audio text of the video along with timeline in seconds.
+Analyze the content and identify 3-5 specific timestamps where frames should be extracted to accurately capture what the user is demonstrating.
+
+Respond ONLY with timestamps in this exact format:
+frame1: X.X seconds
+frame2: X.X seconds  
+frame3: X.X seconds
+
+{csv_path}"""
+                    return enhanced_prompt
                 else:
-                    return "Recording failed: session directory not found"
+                    return "Recording completed but no analysis generated"
             else:
-                error_message = f"Video recording process failed with exit code {process.returncode}.\nStdout: {stdout.strip()}\nStderr: {stderr.strip()}"
+                return "Recording failed"
 
         except subprocess.TimeoutExpired:
             process.kill()
-            stdout, stderr = process.communicate()
             return "Recording timed out"
         except Exception as e:
             return f"Recording error: {str(e)}"
@@ -96,10 +97,9 @@ def main():
     """Main function for command-line usage"""
     
     if len(sys.argv) < 2:
-        print("Usage: python3 gemini_video_handler.py <command>")
-        print("Commands:")
-        print("  record    - Start video recording")
-        print("  test      - Test the integration")
+        print("Usage: python3 gemini_video_handler.py <command>", file=sys.stderr)
+        print("Commands:", file=sys.stderr)
+        print("  record    - Start video recording", file=sys.stderr)
         return 1
     
     handler = GeminiVideoHandler()
@@ -110,12 +110,8 @@ def main():
         processed = handler.process_video_context(context)
         print(processed)
         
-    elif command == 'test':
-        result = handler.start_recording()
-        print(result)
-            
     else:
-        print(f"Unknown command: {command}")
+        print(f"Unknown command: {command}", file=sys.stderr)
         return 1
     
     return 0

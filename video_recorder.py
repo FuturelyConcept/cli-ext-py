@@ -279,15 +279,18 @@ def transcribe_audio_whisper_with_segments(audio_path):
         if audio_file.stat().st_size < 1000:  # Less than 1KB likely means no audio
             return "[No audio detected]", None
         
-        # Load and transcribe with word timestamps (suppress warnings)
+        # Load and transcribe with word timestamps (suppress warnings and progress)
         import warnings
         import os
+        import contextlib
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
             # Suppress CUDA warnings
             os.environ['CUDA_VISIBLE_DEVICES'] = ''
-            model = whisper.load_model(CONFIG['WHISPER_MODEL'])
-            result = model.transcribe(str(audio_path), word_timestamps=True, verbose=False)
+            # Suppress progress bars and other output
+            with contextlib.redirect_stderr(open(os.devnull, 'w')):
+                model = whisper.load_model(CONFIG['WHISPER_MODEL'])
+                result = model.transcribe(str(audio_path), word_timestamps=True, verbose=False)
         
         # Format transcript
         if not result.get('segments') or len(result['segments']) == 0:
@@ -458,7 +461,7 @@ def call_ai_for_frame_analysis(transcript_data, timeline_viz, duration, cli_agen
 
 
 def process_video(video_path):
-    """Process uploaded video: extract frames, transcribe audio, generate context"""
+    """Process uploaded video: transcribe audio, generate word timeline CSV only"""
     global context_result, processing_complete, server_process
     
     try:
@@ -481,31 +484,21 @@ def process_video(video_path):
         else:
             transcript_text = "[No audio track in video]"
         
-        # Use speech analysis for intelligent frame extraction
-        ai_analysis = None
-        if has_audio and transcript_result and transcript_result.get('segments'):
-            # Use our own speech analysis instead of external AI
-            suggested_frames = analyze_speech_for_frame_requests(transcript_result, duration)
-            if suggested_frames:
-                ai_analysis = {
-                    'suggested_frames': suggested_frames,
-                    'reasoning': 'Speech analysis identified key moments',
-                    'total_issues_identified': len(suggested_frames)
-                }
+        # Generate word timeline CSV (Step 1 of two-step workflow)
+        csv_file = None
+        if has_audio and transcript_result:
+            word_timeline = create_word_timeline_table(transcript_result)
+            if word_timeline:
+                csv_content = "timestamp,word\n"  # Add header
+                for entry in word_timeline:
+                    csv_content += f"{entry['time']:.1f},{entry['word']}\n"
+                
+                csv_file = session_dir / "word_timeline.csv"
+                with open(csv_file, 'w', encoding='utf-8') as f:
+                    f.write(csv_content)
         
-        # Extract frames based on what we have
-        frames_dir = session_dir / CONFIG['FRAMES_FOLDER']
-        
-        # Use actual duration from transcript for better accuracy (if available)
-        actual_duration = duration
-        if has_audio and transcript_result and transcript_result.get('segments'):
-            max_segment_end = max(segment['end'] for segment in transcript_result['segments'])
-            actual_duration = max(duration, max_segment_end)
-        
-        extracted_frames = extract_frames(video_path, frames_dir, actual_duration, ai_analysis, transcript_result, has_audio, CONFIG)
-        
-        # Generate context
-        context = generate_context(actual_duration, transcript_text, extracted_frames, None, ai_analysis, has_audio, transcript_result)
+        # Generate minimal context with only CSV reference
+        context = generate_minimal_context(duration, transcript_text, csv_file, has_audio)
         
         context_result = context
         processing_complete = True
@@ -531,15 +524,28 @@ def process_video(video_path):
 
 
 
+def generate_minimal_context(duration, transcript, csv_file, has_audio):
+    """Generate minimal context for CLI agent - Step 1 of two-step workflow"""
+    
+    # Build simple output with only CSV reference
+    output = ""
+    
+    if csv_file and csv_file.exists():
+        csv_path = os.path.relpath(csv_file, os.getcwd()).replace('\\', '/')
+        output = f"@{csv_path}"
+    
+    return output
+
+
 def generate_context(duration, transcript, frame_data, timeline_viz=None, ai_analysis=None, has_audio=True, transcript_result=None):
-    """Generate minimal context for CLI agent"""
+    """Generate full context for CLI agent - Step 2 of two-step workflow"""
     
     # Save word timeline as simple CSV file
     csv_file = None
     if has_audio and transcript_result:
         word_timeline = create_word_timeline_table(transcript_result)
         if word_timeline:
-            csv_content = ""
+            csv_content = "timestamp,word\n"  # Add header
             for entry in word_timeline:
                 csv_content += f"{entry['time']:.1f},{entry['word']}\n"
             
@@ -921,15 +927,9 @@ def main():
         while not processing_complete:
             time.sleep(0.1)
         
-        # Write context to file and just tell user the file path
-        if context_result and context_result != "Error in recording, please try again later":
-            context_file = session_dir / "analysis.txt"
-            with open(context_file, "w", encoding="utf-8") as f:
-                f.write(context_result)
-            
-            # Just print the file path for @ syntax
-            relative_path = os.path.relpath(context_file, os.getcwd()).replace('\\', '/')
-            print(f"Recording complete. Analysis: @{relative_path}")
+        # Output the CSV path directly
+        if context_result and context_result != "Error in recording, please try again":
+            print(context_result)
         else:
             print("Recording failed")
         

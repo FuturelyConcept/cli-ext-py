@@ -114,9 +114,78 @@ Simply ask Gemini:
 - Reduces processing time (no unnecessary frames)
 - Cleaner workflow with explicit frame requests
 
-## Next Steps (Tomorrow)
-1. Implement two-step workflow
-2. Remove automatic frame extraction 
-3. Generate only word_timeline.csv initially
-4. Add frame extraction on demand
-5. Test with Gemini CLI
+## Implementation Status (2025-07-16)
+✅ **COMPLETED**: Two-step workflow implemented and tested
+
+### New Workflow (ACTIVE)
+1. **Step 1**: `python video_recorder.py` → records video → transcribes audio → generates `word_timeline.csv` → outputs `@word_timeline.csv`
+2. **Step 2**: `python extract_frames.py "1.5,3.2,5.0"` → extracts frames at specific timestamps → outputs `@frame_paths`
+
+### Changes Made
+- Modified `video_recorder.py` to use `generate_minimal_context()` 
+- Removed automatic frame extraction from initial recording
+- Created `extract_frames.py` for on-demand frame extraction
+- Added `extract_frames_at_timestamps()` function to `frame_extractor.py`
+- Updated `install.py` to include new extract_frames.py script
+- Tested workflow with `test_workflow.py`
+
+### File Structure (Updated)
+```
+C:\Users\Deepika_Akshaj\.gemini\extensions\video-recording\
+├── video_recorder.py        # Step 1: Record + transcribe + CSV only
+├── extract_frames.py        # Step 2: Extract frames at timestamps
+├── frame_extractor.py       # Frame extraction utilities
+├── requirements.txt         # Dependencies
+└── bin/                     # FFmpeg binaries
+```
+
+### Usage Example
+```bash
+# Step 1: Record video (generates CSV)
+python video_recorder.py
+# Output: Duration 5.0s
+#         @.gemini/video_ext/session/word_timeline.csv
+
+# Step 2: Extract frames at specific timestamps
+python extract_frames.py "1.5,3.2,5.0"
+# Output: @.gemini/video_ext/session/frames/frame_1_at_1.5s.png
+#         @.gemini/video_ext/session/frames/frame_2_at_3.2s.png
+```
+
+### Benefits Achieved
+- ✅ Clean output (no scattered pipes/spaces)
+- ✅ @ file references work properly  
+- ✅ Gemini can analyze timeline before requesting frames
+- ✅ Faster initial processing (no unnecessary frames)
+- ✅ On-demand frame extraction based on analysis
+
+### Output Cleanup (2025-07-16)
+✅ **FIXED**: Removed debug output and simplified analysis format
+
+### Changes Made to Fix Text Cluttering:
+1. **Removed debug prints** from gemini_video_handler.py
+2. **Removed duration** from analysis.txt (redundant with CSV)
+3. **Suppressed Whisper progress bars** using contextlib.redirect_stderr
+4. **Simplified output** - Only essential @ file references
+5. **Clean stdout** - Just `@analysis.txt` path, no extra text
+
+### New Clean Output:
+```
+# Before (cluttered):
+Starting video recording...
+[DEBUG] Executing command...
+Recording complete. Analysis: @analysis.txt
+
+# After (clean):
+@analysis.txt
+```
+
+### Expected analysis.txt content:
+```
+@word_timeline.csv
+Next: Analyze the timeline and request specific frame timestamps
+```
+
+### Next Steps
+- Test with actual Gemini CLI integration
+- Monitor for any edge cases in production use

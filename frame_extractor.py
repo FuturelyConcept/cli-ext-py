@@ -164,3 +164,37 @@ def extract_frames(video_path, frames_dir, duration, ai_analysis=None, transcrip
             pass  # Silent failure
     
     return extracted_frames
+
+
+def extract_frames_at_timestamps(video_path, frames_dir, timestamps):
+    """Extract frames at specific timestamps - Step 2 of two-step workflow"""
+    extracted_frames = []
+    frames_path = Path(frames_dir)
+    frames_path.mkdir(exist_ok=True)
+    
+    for i, timestamp in enumerate(timestamps):
+        timestamp = float(timestamp)
+        frame_filename = f"frame_{i+1}_at_{timestamp:.1f}s.png"
+        frame_path = frames_path / frame_filename
+        
+        try:
+            (
+                ffmpeg
+                .input(str(video_path), ss=timestamp)
+                .output(str(frame_path), vframes=1)
+                .overwrite_output()
+                .run(capture_stdout=True, capture_stderr=True, cmd=ffmpeg_path)
+            )
+            
+            if frame_path.exists():
+                extracted_frames.append({
+                    'path': str(frame_path),
+                    'timestamp': timestamp,
+                    'reason': f'Requested timestamp {timestamp:.1f}s',
+                    'method': 'on_demand'
+                })
+        except Exception as e:
+            # Log error but continue with other frames
+            pass
+    
+    return extracted_frames
