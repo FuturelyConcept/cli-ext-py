@@ -93,7 +93,30 @@ Simply ask Gemini:
 - `SETUP_GUIDE.md` - User documentation
 - All video recording extension files with clean output formatting
 
-## Next Steps
-- Extension is ready for production use
-- Minor transcription issue doesn't prevent core functionality
-- Frame extraction and visual analysis working perfectly
+## CRITICAL INSIGHT - NEW APPROACH (2025-07-15)
+**Problem**: Gemini CLI corrupts output with scattered pipes and spaces, making it unusable.
+
+**Solution**: Two-step process:
+1. **First call**: Record video, transcribe with Whisper, generate word_timeline.csv ONLY. Output: `@word_timeline.csv`
+2. **Wait for Gemini**: Let Gemini analyze the CSV and tell us which timestamps need frames
+3. **Second call**: Extract frames at requested timestamps, provide final analysis
+
+**Key Changes Needed**:
+- Remove automatic frame extraction 
+- Only generate word_timeline.csv initially
+- Wait for Gemini to request specific frame timestamps
+- Extract frames on demand based on Gemini's analysis
+- Final output: word timeline + requested frames + analysis request
+
+**Benefits**:
+- Bypasses output corruption by using @ file references
+- Lets Gemini do intelligent analysis of timeline
+- Reduces processing time (no unnecessary frames)
+- Cleaner workflow with explicit frame requests
+
+## Next Steps (Tomorrow)
+1. Implement two-step workflow
+2. Remove automatic frame extraction 
+3. Generate only word_timeline.csv initially
+4. Add frame extraction on demand
+5. Test with Gemini CLI

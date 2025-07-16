@@ -532,74 +532,39 @@ def process_video(video_path):
 
 
 def generate_context(duration, transcript, frame_data, timeline_viz=None, ai_analysis=None, has_audio=True, transcript_result=None):
-    """Generate clean, CSV-based context for CLI agent"""
-    
-    context_lines = [
-        "# Video Recording Analysis",
-        f"Duration: {duration:.1f}s | Frames: {len(frame_data)} | Audio: {'Yes' if has_audio else 'No'}",
-        ""
-    ]
+    """Generate minimal context for CLI agent"""
     
     # Save word timeline as simple CSV file
+    csv_file = None
     if has_audio and transcript_result:
         word_timeline = create_word_timeline_table(transcript_result)
         if word_timeline:
-            # Create simple CSV content - no headers, just comma-delimited
             csv_content = ""
             for entry in word_timeline:
                 csv_content += f"{entry['time']:.1f},{entry['word']}\n"
             
-            # Save CSV file in session directory
             global session_dir
             if session_dir:
                 csv_file = session_dir / "word_timeline.csv"
                 with open(csv_file, 'w', encoding='utf-8') as f:
                     f.write(csv_content)
-                
-                # Reference the CSV file
-                csv_relative_path = os.path.relpath(csv_file, os.getcwd()).replace('\\', '/')
-                context_lines.extend([
-                    "## Word Timeline",
-                    f"Time,word data: @{csv_relative_path}",
-                    ""
-                ])
     
+    # Build simple output
+    output = f"Duration {duration:.1f}s\n"
     
-    # Complete transcript
+    if csv_file:
+        csv_path = os.path.relpath(csv_file, os.getcwd()).replace('\\', '/')
+        output += f"Timeline @{csv_path}\n"
+    
     if transcript and transcript != "[No audio detected]" and transcript != "[No speech detected]":
-        context_lines.extend([
-            "## Transcript",
-            transcript,
-            ""
-        ])
+        output += f"Transcript\n{transcript}\n"
     
-    # Visual frames
-    context_lines.extend([
-        "## Available Frames"
-    ])
+    output += "Frames\n"
+    for frame in frame_data:
+        frame_path = os.path.relpath(frame['path'], os.getcwd()).replace('\\', '/')
+        output += f"@{frame_path}\n"
     
-    for i, frame in enumerate(frame_data):
-        timestamp = frame['timestamp']
-        frame_path = frame['path']
-        
-        # Format timestamp
-        formatted_timestamp = f"{timestamp:.1f}s"
-        
-        # Get relative path
-        relative_path = os.path.relpath(frame_path, os.getcwd()).replace('\\', '/')
-        
-        context_lines.append(f"Frame {i+1} at {formatted_timestamp}: @{relative_path}")
-    
-    context_lines.append("")
-    
-    # Simple analysis request
-    context_lines.extend([
-        "## Analysis Request", 
-        "Please analyze the word timeline, transcript, and frames to understand what the user needs help with.",
-        "If you need frames at specific times, let me know the timestamps."
-    ])
-    
-    return '\n'.join(context_lines)
+    return output
 
 
 # HTML Templates
@@ -956,16 +921,17 @@ def main():
         while not processing_complete:
             time.sleep(0.1)
         
-        # Write context to file and output the content
+        # Write context to file and just tell user the file path
         if context_result and context_result != "Error in recording, please try again later":
-            context_file = session_dir / "context.md"
+            context_file = session_dir / "analysis.txt"
             with open(context_file, "w", encoding="utf-8") as f:
                 f.write(context_result)
             
-            # Print the context content to stdout for Gemini
-            print(context_result)
+            # Just print the file path for @ syntax
+            relative_path = os.path.relpath(context_file, os.getcwd()).replace('\\', '/')
+            print(f"Recording complete. Analysis: @{relative_path}")
         else:
-            print("Video recording failed. Please try again.")
+            print("Recording failed")
         
         # Don't cleanup immediately - let user see the files
         # cleanup_session()

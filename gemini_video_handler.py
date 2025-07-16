@@ -23,21 +23,7 @@ class GeminiVideoHandler:
         """Start the video recording process"""
         video_recorder_path = self.current_dir / 'video_recorder.py'
 
-        print("Starting video recording. Please look for a new browser window to open shortly.")
-        print("Instructions:")
-        print("1. In the browser window that opens, click 'Start Recording'.")
-        print("2. Select your screen/window to record")
-        print("3. Demonstrate the problem you want solved")
-        print("4. SPEAK CLEARLY about what you want fixed")
-        print("5. Recording will auto-stop after 30 seconds")
-        print("")
-        print("The video will be processed with AI-guided frame extraction...")
-        print("")
-        
-        print(f"[DEBUG] sys.executable in gemini_video_handler: {sys.executable}", file=sys.stderr, flush=True)
-        print(f"[DEBUG] video_recorder_path: {video_recorder_path}", file=sys.stderr, flush=True)
         command = [sys.executable, str(video_recorder_path)]
-        print(f"[DEBUG] Executing command: {command}", file=sys.stderr, flush=True)
 
         try:
             # Start the video recorder as a separate process
@@ -46,67 +32,40 @@ class GeminiVideoHandler:
                 command,
                 stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, bufsize=1
             )
-            print(f"[DEBUG] Subprocess started with PID: {process.pid}", file=sys.stderr, flush=True)
-
             stdout, stderr = process.communicate(timeout=300) # 5 minutes timeout
-
-            print(f"[DEBUG] Subprocess stdout:\n{stdout}", file=sys.stderr, flush=True)
-            print(f"[DEBUG] Subprocess stderr:\n{stderr}", file=sys.stderr, flush=True)
 
             if process.returncode == 0:
                 session_dir_line = next((line for line in stderr.splitlines() if line.startswith("SESSION_DIR:")), None)
                 if session_dir_line:
                     session_dir_path = session_dir_line.replace("SESSION_DIR:", "").strip()
-                    context_file_path = Path(session_dir_path) / "context.md"
+                    context_file_path = Path(session_dir_path) / "analysis.txt"
                     if context_file_path.exists():
                         with open(context_file_path, "r", encoding="utf-8") as f:
                             context_content = f.read()
                         return context_content
                     else:
-                        error_message = f"Video recording process completed, but context file not found: {context_file_path}"
-                        print(error_message, file=sys.stderr, flush=True)
-                        return error_message
+                        return "Recording failed: context file not found"
                 else:
-                    error_message = f"Video recording process completed, but session directory path not found in stderr."
-                    print(error_message, file=sys.stderr, flush=True)
-                    return error_message
+                    return "Recording failed: session directory not found"
             else:
                 error_message = f"Video recording process failed with exit code {process.returncode}.\nStdout: {stdout.strip()}\nStderr: {stderr.strip()}"
 
         except subprocess.TimeoutExpired:
             process.kill()
             stdout, stderr = process.communicate()
-            error_message = f"Video recording timed out after 5 minutes.\nStdout: {stdout.strip()}\nStderr: {stderr.strip()}"
-            print(error_message, file=sys.stderr, flush=True)
-            return error_message
+            return "Recording timed out"
         except Exception as e:
-            error_message = f"Error during video recording: {str(e)}"
-            print(error_message, file=sys.stderr, flush=True)
-            return error_message
+            return f"Recording error: {str(e)}"
     
     def process_video_context(self, context):
         """Process the video context and prepare it for Gemini"""
         if not context or "failed" in context.lower():
             return context
         
-        # Add instructions for Gemini on how to use the video context
-        processed_context = f"""
-# Video Recording Analysis Complete
-
-The video has been processed with AI-guided intelligent frame extraction. Here's what I found:
-
-{context}
-
-## Next Steps for Implementation:
-
-Based on the video analysis above, I should now:
-1. Analyze each frame in the context of the spoken requirements
-2. Identify the specific problems or features mentioned
-3. Implement the requested changes or fixes
-4. Provide code solutions based on the visual and audio context
-
-Please let me analyze the frames and transcript to understand exactly what you want me to implement.
-"""
+        # Just return the file reference if it looks like a file path message
+        if context and "Analysis: @" in context:
+            return context
+        processed_context = context
         
         return processed_context
     
@@ -152,10 +111,7 @@ def main():
         print(processed)
         
     elif command == 'test':
-        print("[DEBUG] Running start_recording() for test...", file=sys.stderr, flush=True)
         result = handler.start_recording()
-        print("[DEBUG] start_recording() returned:", file=sys.stderr, flush=True)
-        print(result, file=sys.stderr, flush=True)
         print(result)
             
     else:
