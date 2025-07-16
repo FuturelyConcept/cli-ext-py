@@ -524,14 +524,7 @@ def generate_minimal_context(duration, transcript, csv_file, video_path, has_aud
     """Generate minimal context for CLI agent - Step 1 of two-step workflow"""
 
     # Build simple output with only CSV reference
-    output_data = {}
-
-    if csv_file and csv_file.exists():
-        output_data["WORD_TIMELINE_PATH"] = str(csv_file.absolute())
-
-    if video_path and Path(video_path).exists():
-        output_data["VIDEO_PATH"] = str(Path(video_path).absolute())
-
+    output_data = {"SESSION_DIR_PATH": str(session_dir.absolute())}
     return json.dumps(output_data)
 
 
@@ -931,7 +924,7 @@ def main():
         
         # Output the CSV path directly
         if context_result and context_result != "Error in recording, please try again":
-            print(context_result)
+            print(context_result.strip())
         else:
             print("Recording failed")
         

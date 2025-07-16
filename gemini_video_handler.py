@@ -26,7 +26,7 @@ class GeminiVideoHandler:
         try:
             process = subprocess.Popen(
                 command,
-                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, bufsize=1
             )
             stdout, stderr = process.communicate(timeout=300)
 
@@ -45,8 +45,6 @@ class GeminiVideoHandler:
             return "Recording timed out"
         except Exception as e:
             return f"Recording error: {str(e)}"
-    
-    
 
 
 def main():
